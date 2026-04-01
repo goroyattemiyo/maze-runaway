@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>複雑ステージ ランダム生成矢印パズル</title>
+    <title>矢印パズル - 極限難易度</title>
     <style>
         body {
             font-family: 'Helvetica Neue', Arial, sans-serif;
@@ -11,397 +11,282 @@
             background-color: #f7f9fc;
             margin: 0;
             padding: 20px;
+            /* クリック時の青い反転（選択状態）を防止 */
+            user-select: none;
+            -webkit-user-select: none;
+            -ms-user-select: none;
         }
-        h1 { color: #2c3e50; font-size: 24px; }
+        h1 { color: #2c3e50; font-size: 22px; margin-bottom: 10px; }
+        
+        .controls { margin-bottom: 15px; }
+        
         #gameCanvas {
             background-color: #ffffff;
             border: 2px solid #bdc3c7;
             border-radius: 8px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
             display: block;
-            margin: 10px auto;
+            margin: 0 auto;
             cursor: pointer;
+            /* キャンバス上でのタップによる拡大などを防止 */
+            touch-action: manipulation;
         }
+        
         .btn {
-            padding: 12px 24px;
-            font-size: 16px;
+            padding: 10px 18px;
+            font-size: 14px;
+            margin: 0 5px;
             background-color: #2c3e50;
             color: white;
             border: none;
             border-radius: 6px;
             cursor: pointer;
-            transition: background-color 0.2s;
+            transition: 0.2s;
         }
         .btn:hover { background-color: #34495e; }
+        .btn.active { background-color: #e74c3c; font-weight: bold; }
+        
         #message {
-            font-size: 18px;
+            font-size: 16px;
             color: #e74c3c;
             font-weight: bold;
-            height: 20px;
-            margin-bottom: 10px;
+            height: 24px;
+            margin-top: 10px;
         }
     </style>
 </head>
 <body>
 
-    <h1>矢印パズル（複雑ステージ生成）</h1>
+    <h1>矢印パズル - 極限難易度</h1>
+
+    <div class="controls">
+        <button class="btn active" id="btn-normal" onclick="setDifficulty('normal')">通常 (12x12)</button>
+        <button class="btn" id="btn-large" onclick="setDifficulty('large')">大型 (20x20)</button>
+        <button class="btn" id="btn-mega" onclick="setDifficulty('mega')">巨大 (30x30)</button>
+        <button class="btn" id="btn-extreme" onclick="setDifficulty('extreme')">極限 (30x45)</button>
+    </div>
+
+    <canvas id="gameCanvas" width="800" height="800"></canvas>
     <div id="message"></div>
-    <canvas id="gameCanvas" width="600" height="600"></canvas>
-    <br>
-    <button class="btn" onclick="resetGame()">新しいステージを生成</button>
 
     <script>
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         const messageDiv = document.getElementById('message');
 
-        const gridCount = 12; // 12x12のマス目
-        const cellSize = 40; // 1マスのサイズ
-        const offset = 60;  // 画面の余白
-        const numArrows = 20; // 矢印の本数
-
-        const colors = [
-            '#3498db', // 青
-            '#e74c3c', // 赤
-            '#2ecc71', // 緑
-            '#f39c12', // 橙
-            '#9b59b6', // 紫
-            '#e84393'  // 桃
-        ];
-
+        // デフォルト設定
+        let gridX = 12; // 横のマス数
+        let gridY = 12; // 縦のマス数
+        let numArrows = 20;
+        let cellSize = 50;
+        const offset = 40; 
+        
         let arrows = [];
         let goneArrows = 0;
+        let currentMode = 'normal';
+
+        function setDifficulty(mode) {
+            currentMode = mode;
+            // ボタンの見た目更新
+            document.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('btn-' + mode).classList.add('active');
+
+            if (mode === 'normal') {
+                gridX = 12; gridY = 12; numArrows = 25; cellSize = 600 / gridX;
+            } else if (mode === 'large') {
+                gridX = 20; gridY = 20; numArrows = 70; cellSize = 700 / gridX;
+            } else if (mode === 'mega') {
+                gridX = 30; gridY = 30; numArrows = 150; cellSize = 750 / gridX;
+            } else if (mode === 'extreme') {
+                gridX = 30; gridY = 45; numArrows = 250; cellSize = 800 / gridX; // 縦長
+            }
+            
+            canvas.width = gridX * cellSize + offset * 2;
+            canvas.height = gridY * cellSize + offset * 2;
+            resetGame();
+        }
 
         function getRandomInt(min, max) {
             return Math.floor(Math.random() * (max - min)) + min;
         }
 
-        // --- ステージ生成ロジック（逆再生生成） ---
         function generateStage() {
             arrows = [];
             goneArrows = 0;
-            const gridStatus = new Array(gridCount).fill(0).map(() => new Array(gridCount).fill(null));
+            const gridStatus = new Array(gridX).fill(0).map(() => new Array(gridY).fill(null));
 
             for (let i = 0; i < numArrows; i++) {
                 let success = false;
                 let attempts = 0;
-
-                while (!success && attempts < 100) {
+                while (!success && attempts < 50) {
                     attempts++;
-                    
-                    // 1. 挿入方向をランダムに決定
-                    const dirIndices = [0, 1, 2, 3]; // 0:left, 1:right, 2:top, 3:bottom
+                    const dirIndices = [0, 1, 2, 3];
                     const startDirIdx = dirIndices[getRandomInt(0, 4)];
                     let startPos, rev_v, actual_dir;
 
-                    // 2. 始点（先端）を決定
-                    if (startDirIdx === 0) { // left から差し込む
-                        startPos = { x: 0, y: getRandomInt(0, gridCount) };
+                    if (startDirIdx === 0) { // left
+                        startPos = { x: 0, y: getRandomInt(0, gridY) };
                         rev_v = { x: 1, y: 0 }; actual_dir = 'left';
                     } else if (startDirIdx === 1) { // right
-                        startPos = { x: gridCount - 1, y: getRandomInt(0, gridCount) };
+                        startPos = { x: gridX - 1, y: getRandomInt(0, gridY) };
                         rev_v = { x: -1, y: 0 }; actual_dir = 'right';
                     } else if (startDirIdx === 2) { // top
-                        startPos = { x: getRandomInt(0, gridCount), y: 0 };
+                        startPos = { x: getRandomInt(0, gridX), y: 0 };
                         rev_v = { x: 0, y: 1 }; actual_dir = 'up';
-                    } else if (startDirIdx === 3) { // bottom
-                        startPos = { x: getRandomInt(0, gridCount), y: gridCount - 1 };
+                    } else { // bottom
+                        startPos = { x: getRandomInt(0, gridX), y: gridY - 1 };
                         rev_v = { x: 0, y: -1 }; actual_dir = 'down';
                     }
 
-                    // 他の先端と近すぎないか、重なっていないか
                     if (gridStatus[startPos.x][startPos.y] !== null) continue;
                     
-                    // 3. カギ型ラインの成長（逆再生で伸ばす）
                     let points = [startPos];
                     let currentCells = [{x: startPos.x, y: startPos.y}];
-                    gridStatus[startPos.x][startPos.y] = i + 1; // 予約
-                    let bends = getRandomInt(1, 3); // 曲がる回数
+                    gridStatus[startPos.x][startPos.y] = i + 1;
                     
-                    // 最初のセグメント
                     let currPoint = startPos;
-                    let len = getRandomInt(1, 4);
                     let curr_v = {x: rev_v.x, y: rev_v.y};
-                    let growSuccess = true;
+                    let segments = getRandomInt(2, 6); // 曲がる回数を増やす
 
-                    // ライン全体を伸ばす処理
-                    function growSegment(startP, v, l) {
-                        let segPoints = [];
-                        let p = {x: startP.x, y: startP.y};
-                        for (let k = 0; k < l; k++) {
-                            p.x += v.x;
-                            p.y += v.y;
-                            // グリッド内、重なりチェック
-                            if (p.x < 0 || p.x >= gridCount || p.y < 0 || p.y >= gridCount || gridStatus[p.x][p.y] !== null) return null;
-                            
-                            gridStatus[p.x][p.y] = i + 1; // マスを確保
-                            currentCells.push({x: p.x, y: p.y});
-                            segPoints.push({x: p.x, y: p.y});
+                    for(let s=0; s<segments; s++) {
+                        let len = getRandomInt(2, 7);
+                        for(let k=0; k<len; k++) {
+                            let nextX = currPoint.x + curr_v.x;
+                            let nextY = currPoint.y + curr_v.y;
+                            if(nextX < 0 || nextX >= gridX || nextY < 0 || nextY >= gridY || gridStatus[nextX][nextY] !== null) break;
+                            gridStatus[nextX][nextY] = i + 1;
+                            currentCells.push({x: nextX, y: nextY});
+                            currPoint = {x: nextX, y: nextY};
                         }
-                        return segPoints;
+                        points.push(currPoint);
+                        // 次の曲がり方向
+                        curr_v = (curr_v.x === 0) ? {x: (Math.random() < 0.5 ? 1 : -1), y: 0} : {x: 0, y: (Math.random() < 0.5 ? 1 : -1)};
                     }
 
-                    // 最初のセグメントを伸ばす
-                    let seg1 = growSegment(currPoint, curr_v, len);
-                    if (!seg1) { 
-                        currentCells.forEach(c => gridStatus[c.x][c.y] = null); // 予約解除
-                        continue; 
-                    }
-                    if (seg1.length > 0) {
-                        points.push(seg1[seg1.length - 1]);
-                        currPoint = points[points.length - 1];
-                    }
-
-                    // 曲がる
-                    if (bends > 0) {
-                        // 曲がる方向を選択（curr_vに直角な2方向から）
-                        let bend_v = (curr_v.x === 0) ? {x: 1, y: 0} : {x: 0, y: 1};
-                        if (Math.random() < 0.5) { bend_v.x *= -1; bend_v.y *= -1; }
-                        
-                        let len2 = getRandomInt(1, 4);
-                        let seg2 = growSegment(currPoint, bend_v, len2);
-                        if (!seg2 || seg2.length === 0) {
-                            // 曲がれなかった。1セグメントのみで終了
-                        } else {
-                            points.push(seg2[seg2.length - 1]);
-                            currPoint = points[points.length - 1];
-                            curr_v = bend_v; // 方向更新
-
-                            // 2回目の曲がり
-                            if (bends > 1) {
-                                let bend_v2 = (curr_v.x === 0) ? {x: 1, y: 0} : {x: 0, y: 1};
-                                if (Math.random() < 0.5) { bend_v2.x *= -1; bend_v2.y *= -1; }
-                                let len3 = getRandomInt(1, 4);
-                                let seg3 = growSegment(currPoint, bend_v2, len3);
-                                if (seg3 && seg3.length > 0) {
-                                    points.push(seg3[seg3.length - 1]);
-                                }
-                            }
-                        }
-                    }
-
-                    // 長さが極端に短い場合はやり直し
-                    if (currentCells.length < 2) {
-                        currentCells.forEach(c => gridStatus[c.x][c.y] = null); // 予約解除
+                    if (currentCells.length < 3) {
+                        currentCells.forEach(c => gridStatus[c.x][c.y] = null);
                         continue;
                     }
 
-                    // 4. 矢印データの確定
                     arrows.push({
-                        id: i + 1,
-                        points: points, // カギ型の点配列 [先端, 角1, 角2, 末尾]
-                        dir: actual_dir,
-                        color: colors[getRandomInt(0, colors.length)],
+                        id: i + 1, points: points, dir: actual_dir,
+                        color: currentMode === 'extreme' ? '#333' : '#333', // 色を統一（迷路感を出す）
                         moving: false, moveOffset: 0, gone: false
                     });
                     success = true;
                 }
             }
-            // リストを反転させることで、最初に生成（＝最後に差し込まれた）矢印が一番外側になり、タップしやすくなる傾向に。
             arrows.reverse();
         }
 
-        // --- 描画処理 ---
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            // 1. マス目（グリッド）を描画
-            ctx.strokeStyle = '#e0e6ed';
+            ctx.strokeStyle = '#eee';
             ctx.lineWidth = 1;
-            for(let i=0; i<=gridCount; i++) {
+            for(let i=0; i<=gridX; i++) {
                 ctx.beginPath();
-                ctx.moveTo(offset + i*cellSize, offset);
-                ctx.lineTo(offset + i*cellSize, offset + gridCount*cellSize);
-                ctx.stroke();
+                ctx.moveTo(offset + i*cellSize, offset); ctx.lineTo(offset + i*cellSize, offset + gridY*cellSize); ctx.stroke();
+            }
+            for(let j=0; j<=gridY; j++) {
                 ctx.beginPath();
-                ctx.moveTo(offset, offset + i*cellSize);
-                ctx.lineTo(offset + gridCount*cellSize, offset + i*cellSize);
-                ctx.stroke();
+                ctx.moveTo(offset, offset + j*cellSize); ctx.lineTo(offset + gridX*cellSize, offset + j*cellSize); ctx.stroke();
             }
 
-            // 2. 矢印を描画
             arrows.forEach(arrow => {
                 if(arrow.gone) return;
-
-                ctx.strokeStyle = arrow.color;
-                ctx.fillStyle = arrow.color;
-                ctx.lineWidth = 10; // 太めのライン
-                ctx.lineCap = 'round';
-                ctx.lineJoin = 'round';
+                ctx.strokeStyle = arrow.color; ctx.fillStyle = arrow.color;
+                ctx.lineWidth = cellSize * 0.4; // マス目に合わせた太さ
+                ctx.lineCap = 'round'; ctx.lineJoin = 'round';
 
                 const mv = arrow.moving ? getVelocityForDir(arrow.dir) : {dx: 0, dy: 0};
-                const mx = mv.dx * arrow.moveOffset;
-                const my = mv.dy * arrow.moveOffset;
+                const mx = mv.dx * arrow.moveOffset; const my = mv.dy * arrow.moveOffset;
 
-                // 体（カギ型ライン）を描く
                 ctx.beginPath();
-                arrow.points.forEach((point, index) => {
-                    let x = offset + point.x * cellSize + cellSize/2;
-                    let y = offset + point.y * cellSize + cellSize/2;
-                    x += mx; y += my;
-                    if(index === 0) ctx.moveTo(x, y);
-                    else ctx.lineTo(x, y);
+                arrow.points.forEach((p, idx) => {
+                    let x = offset + p.x * cellSize + cellSize/2 + mx;
+                    let y = offset + p.y * cellSize + cellSize/2 + my;
+                    if(idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
                 });
                 ctx.stroke();
 
-                // 頭（矢印の先端）を描く。points[0] が先端。
                 const head = arrow.points[0];
                 let hx = offset + head.x * cellSize + cellSize/2 + mx;
                 let hy = offset + head.y * cellSize + cellSize/2 + my;
-
                 ctx.beginPath();
-                const size = 10;
-                if(arrow.dir === 'right') {
-                    ctx.moveTo(hx + size, hy); ctx.lineTo(hx - size, hy - size); ctx.lineTo(hx - size, hy + size);
-                } else if(arrow.dir === 'left') {
-                    ctx.moveTo(hx - size, hy); ctx.lineTo(hx + size, hy - size); ctx.lineTo(hx + size, hy + size);
-                } else if(arrow.dir === 'up') {
-                    ctx.moveTo(hx, hy - size); ctx.lineTo(hx - size, hy + size); ctx.lineTo(hx + size, hy + size);
-                } else if(arrow.dir === 'down') {
-                    ctx.moveTo(hx, hy + size); ctx.lineTo(hx - size, hy - size); ctx.lineTo(hx + size, hy - size);
-                }
+                const s = cellSize * 0.35;
+                if(arrow.dir === 'right') { ctx.moveTo(hx+s, hy); ctx.lineTo(hx-s, hy-s); ctx.lineTo(hx-s, hy+s); }
+                else if(arrow.dir === 'left') { ctx.moveTo(hx-s, hy); ctx.lineTo(hx+s, hy-s); ctx.lineTo(hx+s, hy+s); }
+                else if(arrow.dir === 'up') { ctx.moveTo(hx, hy-s); ctx.lineTo(hx-s, hy+s); ctx.lineTo(hx+s, hy+s); }
+                else if(arrow.dir === 'down') { ctx.moveTo(hx, hy+s); ctx.lineTo(hx-s, hy-s); ctx.lineTo(hx+s, hy-s); }
                 ctx.fill();
             });
         }
 
         function getVelocityForDir(dir) {
-            if(dir === 'right') return {dx: 1, dy: 0};
-            if(dir === 'left') return {dx: -1, dy: 0};
-            if(dir === 'up') return {dx: 0, dy: -1};
-            if(dir === 'down') return {dx: 0, dy: 1};
-            return {dx: 0, dy: 0};
+            return dir === 'right' ? {dx: 1, dy: 0} : dir === 'left' ? {dx: -1, dy: 0} : dir === 'up' ? {dx: 0, dy: -1} : {dx: 0, dy: 1};
         }
 
-        // 矢印が占有するすべてのマス（セグメントに沿った全マス）を特定する
         function getCellsForArrow(arrow) {
             let cells = [];
             for (let i = 0; i < arrow.points.length - 1; i++) {
-                let p0 = arrow.points[i];
-                let p1 = arrow.points[i+1];
-                if (p0.x === p1.x) { // 垂直線
-                    let start = Math.min(p0.y, p1.y);
-                    let end = Math.max(p0.y, p1.y);
-                    for (let y = start; y <= end; y++) {
-                        if (!cells.some(c => c.x === p0.x && c.y === y)) cells.push({x: p0.x, y: y});
-                    }
-                } else if (p0.y === p1.y) { // 水平線
-                    let start = Math.min(p0.x, p1.x);
-                    let end = Math.max(p0.x, p1.x);
-                    for (let x = start; x <= end; x++) {
-                        if (!cells.some(c => c.x === x && c.y === p0.y)) cells.push({x: x, y: p0.y});
-                    }
+                let p0 = arrow.points[i], p1 = arrow.points[i+1];
+                let dx = Math.sign(p1.x - p0.x), dy = Math.sign(p1.y - p0.y);
+                let curr = {x: p0.x, y: p0.y};
+                while(true) {
+                    if(!cells.some(c => c.x === curr.x && c.y === curr.y)) cells.push({x: curr.x, y: curr.y});
+                    if(curr.x === p1.x && curr.y === p1.y) break;
+                    curr.x += dx; curr.y += dy;
                 }
-            }
-            // 先端(points[0])も確実に追加
-            if (!cells.some(c => c.x === arrow.points[0].x && c.y === arrow.points[0].y)) {
-                cells.unshift({x: arrow.points[0].x, y: arrow.points[0].y});
             }
             return cells;
         }
 
-        // --- 衝突判定 ---
-        function checkCollisionComplex(arrow) {
-            // 矢印が占有する全マス
+        function checkCollision(arrow) {
             let myCells = getCellsForArrow(arrow);
-            let v = getVelocityForDir(arrow.dir); // (dx, dy)
+            let v = getVelocityForDir(arrow.dir);
+            let otherGrid = {};
+            arrows.forEach(a => { if (a !== arrow && !a.gone) getCellsForArrow(a).forEach(c => otherGrid[`${c.x},${c.y}`] = true); });
 
-            // グリッドを管理する2次元配列を一時的に作成（他のすべての矢印のマスを記録）
-            let otherGrid = new Array(gridCount).fill(0).map(() => new Array(gridCount).fill(null));
-            arrows.forEach(a => {
-                if (a === arrow || a.gone) return;
-                getCellsForArrow(a).forEach(c => {
-                    otherGrid[c.x][c.y] = a;
-                });
-            });
-
-            // 1グリッドずつ動かしてみる
-            let tempCells = myCells.map(c => ({x: c.x, y: c.y}));
-            let step = 0;
-            while (true) {
-                step++;
-                // すべてのマスを1歩動かす
-                tempCells.forEach(c => {
-                    c.x += v.dx;
-                    c.y += v.dy;
-                });
-
-                // 画面外に出たかチェック（クリア）
-                let allOut = tempCells.every(c => c.x < 0 || c.x >= gridCount || c.y < 0 || c.y >= gridCount);
-                if (allOut) return false; // 衝突なしでクリア可能
-
-                // 他の矢印にぶつかったかチェック
-                for (let c of tempCells) {
-                    // グリッド内にあるマスだけチェック
-                    if (c.x >= 0 && c.x < gridCount && c.y >= 0 && c.y < gridCount) {
-                        if (otherGrid[c.x][c.y]) {
-                            // 他の矢印のマスと重なった！
-                            return true; // 衝突あり
-                        }
-                    }
-                }
-                
-                // 無限ループ防止
-                if (step > gridCount * 2) break;
+            let temp = myCells.map(c => ({...c}));
+            // グリッドを抜けるのに十分なステップ
+            for(let s=0; s < Math.max(gridX, gridY)*2; s++) {
+                temp.forEach(c => { c.x += v.dx; c.y += v.dy; });
+                if(temp.every(c => c.x < 0 || c.x >= gridX || c.y < 0 || c.y >= gridY)) return false;
+                if(temp.some(c => otherGrid[`${c.x},${c.y}`])) return true;
             }
             return false;
         }
 
-        // --- クリックイベント ---
-        canvas.addEventListener('click', (e) => {
+        canvas.addEventListener('mousedown', (e) => {
             messageDiv.innerText = "";
             const rect = canvas.getBoundingClientRect();
-            const mx = e.clientX - rect.left;
-            const my = e.clientY - rect.top;
+            const gx = Math.floor((e.clientX - rect.left - offset) / cellSize);
+            const gy = Math.floor((e.clientY - rect.top - offset) / cellSize);
 
-            // クリック位置をグリッド座標に変換
-            const gx = Math.floor((mx - offset) / cellSize);
-            const gy = Math.floor((my - offset) / cellSize);
-
-            arrows.forEach(arrow => {
-                if(arrow.gone || arrow.moving) return;
-
-                // 矢印全体（カギ型ライン上のマス）のどこかがクリックされたか
-                const myCells = getCellsForArrow(arrow);
-                const clicked = myCells.some(cell => cell.x === gx && cell.y === gy);
-                
-                if(clicked) {
-                    if(!checkCollisionComplex(arrow)) {
-                        arrow.moving = true; // 出発！
-                    } else {
-                        messageDiv.innerText = "道が塞がれています！";
-                    }
+            for(let arrow of arrows) {
+                if(arrow.gone || arrow.moving) continue;
+                if(getCellsForArrow(arrow).some(c => c.x === gx && c.y === gy)) {
+                    if(!checkCollision(arrow)) arrow.moving = true;
+                    else messageDiv.innerText = "道が塞がれています！";
+                    return;
                 }
-            });
+            }
         });
 
-        // リセット
-        function resetGame() {
-            messageDiv.innerText = "";
-            generateStage();
-        }
+        function resetGame() { messageDiv.innerText = ""; generateStage(); }
 
-        // --- ゲームループ（アニメーション） ---
         function loop() {
-            arrows.forEach(arrow => {
-                if(arrow.moving) {
-                    arrow.moveOffset += 12; // 動くスピード
-                    // グリッドを完全に抜ける（オフセット＋グリッドサイズ）
-                    if(arrow.moveOffset > canvas.width) {
-                        arrow.gone = true;
-                        arrow.moving = false;
-                        goneArrows++;
-                        if (goneArrows === numArrows) {
-                            messageDiv.innerText = "ステージクリア！";
-                        }
-                    }
+            arrows.forEach(a => {
+                if(a.moving) {
+                    a.moveOffset += cellSize * 0.5;
+                    if(a.moveOffset > Math.max(canvas.width, canvas.height)) { a.gone = true; a.moving = false; goneArrows++; if(goneArrows === numArrows) messageDiv.innerText = "CLEAR!"; }
                 }
             });
             draw();
             requestAnimationFrame(loop);
         }
 
-        // 初期化
-        resetGame();
+        setDifficulty('extreme'); // デフォルトを極限に
         loop();
     </script>
 </body>
